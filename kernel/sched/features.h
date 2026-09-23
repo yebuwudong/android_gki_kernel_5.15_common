@@ -81,7 +81,7 @@ SCHED_FEAT(WARN_DOUBLE_CLOCK, false)
 # ifdef CONFIG_PREEMPT_RT
 SCHED_FEAT(RT_PUSH_IPI, true)
 # else
-SCHED_FEAT(RT_PUSH_IPI, false)
+SCHED_FEAT(RT_PUSH_IPI, true)
 # endif
 #endif
 
