@@ -78,6 +78,46 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 "$HOME/AnyKernel3"
           rm -rf "$HOME/AnyKernel3/.git"
+          # Replace the upstream Galaxy Nexus example config with a GKI
+          # universal one: no device whitelist, auto-detected boot
+          # partition, flash_boot (boot.img holds kernel only on GKI)
+          cat > "$HOME/AnyKernel3/anykernel.sh" <<'EOF'
+          ### AnyKernel3 GKI flashable
+          ## osm0sis @ xda-developers
+
+          ### AnyKernel setup
+          # global properties
+          properties() { '
+          kernel.string=android13-5.15 GKI kernel
+          do.devicecheck=0
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; } # end properties
+
+          ### AnyKernel install
+          ## boot files attributes
+          boot_attributes() {
+          set_perm_recursive 0 0 755 644 $RAMDISK/*;
+          } # end attributes
+
+          # boot shell variables
+          BLOCK=auto;
+          IS_SLOT_DEVICE=0;
+          RAMDISK_COMPRESSION=none;
+          PATCH_VBMETA_FLAG=auto;
+
+          # import functions/variables and setup patching - see for reference (DO NOT REMOVE)
+          . tools/ak3-core.sh;
+
+          # boot install - GKI boot.img holds the kernel only; flash_boot skips ramdisk
+          flash_boot;
+          ## end boot install
+          EOF
           cp out/arch/arm64/boot/Image.gz "$HOME/AnyKernel3/Image.gz"
           REL=$(cat out/include/config/kernel.release)
           cd "$HOME/AnyKernel3"
