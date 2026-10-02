@@ -106,16 +106,39 @@ jobs:
           } # end attributes
 
           # boot shell variables
-          BLOCK=auto;
-          IS_SLOT_DEVICE=0;
-          RAMDISK_COMPRESSION=none;
+          BLOCK=boot;
+          IS_SLOT_DEVICE=auto;
+          RAMDISK_COMPRESSION=auto;
           PATCH_VBMETA_FLAG=auto;
 
           # import functions/variables and setup patching - see for reference (DO NOT REMOVE)
           . tools/ak3-core.sh;
 
-          # boot install - GKI boot.img holds the kernel only; flash_boot skips ramdisk
-          flash_boot;
+          # GKI: restricted flashing environments (app sandboxes, minimal recoveries)
+          # may miss the /dev/block/by-name symlink directory that find_block expects.
+          # Rebuild the link from whatever by-name dir exists; if there is none at
+          # all, resolve the raw boot node (current slot first) and hand its full
+          # path to find_block.
+          if [ ! -e /dev/block/by-name ]; then
+            BYNAMEDIR=$(find /dev/block -type d -name by-name 2>/dev/null | head -n 1);
+            if [ -n "$BYNAMEDIR" ]; then
+              ln -sfn "$BYNAMEDIR" /dev/block/by-name;
+            else
+              RAWBOOT=$(find /dev/block \( -name "boot$(cat /proc/cmdline 2>/dev/null | grep -o 'androidboot.slot_suffix=[a_b]*' | cut -d= -f2)" -o -name boot -o -name boot_a -o -name boot_b \) 2>/dev/null | sort | head -n 1);
+              [ -n "$RAWBOOT" ] && BLOCK="$RAWBOOT";
+            fi;
+          fi;
+
+          # boot install - same branch logic as the known-working upstream package:
+          # split_boot+flash_boot when an init_boot ramdisk exists, dump_boot+write_boot
+          # otherwise.
+          if [ -L "/dev/block/bootdevice/by-name/init_boot_a" -o -L "/dev/block/by-name/init_boot_a" ]; then
+              split_boot;
+              flash_boot;
+          else
+              dump_boot;
+              write_boot;
+          fi;
           ## end boot install
           EOF
           cp out/arch/arm64/boot/Image.gz "$HOME/AnyKernel3/Image.gz"
