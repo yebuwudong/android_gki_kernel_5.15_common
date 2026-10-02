@@ -1,0 +1,91 @@
+name: Build GKI Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'android13-*'
+
+env:
+  ARCH: arm64
+  CLANG_VERSION: r547379
+  # Stock GKI KMI suffix so `uname -r` matches the official GKI string
+  LOCALVERSION: -android13-8
+  KBUILD_BUILD_USER: build
+  KBUILD_BUILD_HOST: build
+  KBUILD_BUILD_TIMESTAMP: 'Thu Jun 5 12:00:00 UTC 2025'
+
+jobs:
+  build:
+    name: Build android13-5.15 GKI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison ca-certificates dwarves flex gcc-aarch64-linux-gnu \
+            libelf-dev libssl-dev python3 zip
+          sudo apt-get clean
+          echo "nproc=$(nproc)" >> "$GITHUB_ENV"
+
+      - name: Fetch clang ${{ env.CLANG_VERSION }}
+        run: |
+          # Official ACK kernel toolchain from AOSP prebuilts (build.config.constants)
+          if ! git clone --filter=blob:none --no-checkout --depth 1 -b main \
+               https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+               "$HOME/clang/linux-x86"; then
+            echo "::warning::googlesource clone failed, falling back to community rolling clang"
+            mkdir -p "$HOME/clang/linux-x86/clang-${CLANG_VERSION}"
+            curl -sL "https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-main-link.txt" -o /tmp/clang-url.txt
+            curl -L "$(cat /tmp/clang-url.txt)" -o /tmp/clang.tar.gz
+            tar -xf /tmp/clang.tar.gz -C "$HOME/clang/linux-x86/clang-${CLANG_VERSION}" --strip-components=1
+          else
+            cd "$HOME/clang/linux-x86"
+            git sparse-checkout init --cone
+            git sparse-checkout set "clang-${CLANG_VERSION}"
+            git checkout main
+          fi
+          "$HOME/clang/linux-x86/clang-${CLANG_VERSION}/bin/clang" --version
+          echo "CLANG_BIN=$HOME/clang/linux-x86/clang-${CLANG_VERSION}/bin" >> "$GITHUB_ENV"
+
+      - name: Configure and build
+        run: |
+          export PATH="${CLANG_BIN}:$PATH"
+          make O=out ARCH=${ARCH} LLVM=1 LLVM_IAS=1 gki_defconfig
+          make O=out ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} Image.gz
+          echo "Kernel release: $(make O=out ARCH=${ARCH} LLVM=1 kernelrelease)"
+
+      - name: Verify kernel release string
+        run: |
+          REL=$(make O=out ARCH=${ARCH} LLVM=1 kernelrelease)
+          echo "uname -r will report: ${REL}"
+          test -f out/arch/arm64/boot/Image.gz
+
+      - name: Package AnyKernel3 flashable zip
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 "$HOME/AnyKernel3"
+          rm -rf "$HOME/AnyKernel3/.git"
+          cp out/arch/arm64/boot/Image.gz "$HOME/AnyKernel3/Image.gz"
+          REL=$(make O=out ARCH=${ARCH} LLVM=1 kernelrelease)
+          cd "$HOME/AnyKernel3"
+          zip -r9 "$GITHUB_WORKSPACE/AnyKernel3-GKI-${REL}.zip" . -x '.git*'
+
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image.gz-android13-gki
+          path: out/arch/arm64/boot/Image.gz
+          compression-level: 0
+
+      - name: Upload AnyKernel3 zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-GKI-flashable
+          path: AnyKernel3-GKI-*.zip
+          compression-level: 0
