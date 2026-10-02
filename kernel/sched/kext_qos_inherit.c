@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * sew_qos_inherit: minimal QOS-inheritance on the futex wait chain,
+ * kext_qos_inherit: minimal QOS-inheritance on the futex wait chain,
  * reduced port of the Xiaomi OS4 xr_qi module idea ("MI QOS inherit
  * Driver": propagate importance from a lock holder to waiters).
  *
@@ -25,15 +25,15 @@
 #include <linux/uaccess.h>
 #include <trace/hooks/futex.h>
 
-#define SEW_QI_UCLAMP_MIN_DEFAULT 256 /* 25% of 1024 */
+#define KEXT_QI_UCLAMP_MIN_DEFAULT 256 /* 25% of 1024 */
 
 /* Mirror of kernel/sched/core.c uclamp_bucket_id() (static there). */
-#define SEW_QI_BUCKET_DELTA \
+#define KEXT_QI_BUCKET_DELTA \
 	DIV_ROUND_CLOSEST(SCHED_CAPACITY_SCALE, UCLAMP_BUCKETS)
 
-static pid_t sew_qi_vip_tgid;
-static unsigned int sew_qi_uclamp_min = SEW_QI_UCLAMP_MIN_DEFAULT;
-static atomic64_t sew_qi_hinted_waits;
+static pid_t kext_qi_vip_tgid;
+static unsigned int kext_qi_uclamp_min = KEXT_QI_UCLAMP_MIN_DEFAULT;
+static atomic64_t kext_qi_hinted_waits;
 
 /*
  * Save/restore slots keyed by tid (not tgid): if the user re-points
@@ -45,94 +45,94 @@ static atomic64_t sew_qi_hinted_waits;
  * original: a torn bitfield read self-corrects on the next bucket
  * update, and rq aggregation catches up at the next enqueue/dequeue.
  */
-#define SEW_QI_HINT_SLOTS 16
-struct sew_qi_hint {
+#define KEXT_QI_HINT_SLOTS 16
+struct kext_qi_hint {
 	int		tid;
 	unsigned int	prev_value;
 };
-static struct sew_qi_hint sew_qi_hints[SEW_QI_HINT_SLOTS];
-static DEFINE_SPINLOCK(sew_qi_hint_lock);
-static atomic_t sew_qi_active_hints;
+static struct kext_qi_hint kext_qi_hints[KEXT_QI_HINT_SLOTS];
+static DEFINE_SPINLOCK(kext_qi_hint_lock);
+static atomic_t kext_qi_active_hints;
 
-static void sew_qi_wait_start(void *data, u32 flags, u32 bitset)
+static void kext_qi_wait_start(void *data, u32 flags, u32 bitset)
 {
 	struct task_struct *t = current;
 	unsigned long irqflags;
 	int i, slot = -1;
 
-	if (!sew_qi_vip_tgid || task_tgid_nr(t) != sew_qi_vip_tgid)
+	if (!kext_qi_vip_tgid || task_tgid_nr(t) != kext_qi_vip_tgid)
 		return;
 
 	/*
 	 * Tracepoint probes run with preemption disabled, so only
 	 * non-sleeping work happens here (spinlock is fine).
 	 */
-	spin_lock_irqsave(&sew_qi_hint_lock, irqflags);
-	for (i = 0; i < SEW_QI_HINT_SLOTS; i++) {
-		if (sew_qi_hints[i].tid == t->pid) {
+	spin_lock_irqsave(&kext_qi_hint_lock, irqflags);
+	for (i = 0; i < KEXT_QI_HINT_SLOTS; i++) {
+		if (kext_qi_hints[i].tid == t->pid) {
 			slot = i;
 			break;
 		}
-		if (slot < 0 && sew_qi_hints[i].tid == 0)
+		if (slot < 0 && kext_qi_hints[i].tid == 0)
 			slot = i;
 	}
 	if (slot >= 0) {
-		sew_qi_hints[slot].tid = t->pid;
-		sew_qi_hints[slot].prev_value =
+		kext_qi_hints[slot].tid = t->pid;
+		kext_qi_hints[slot].prev_value =
 			t->uclamp_req[UCLAMP_MIN].value;
-		atomic_inc(&sew_qi_active_hints);
+		atomic_inc(&kext_qi_active_hints);
 		/* uclamp_bucket_id() is core.c-static; same mapping inline. */
-		t->uclamp_req[UCLAMP_MIN].value = sew_qi_uclamp_min;
+		t->uclamp_req[UCLAMP_MIN].value = kext_qi_uclamp_min;
 		t->uclamp_req[UCLAMP_MIN].bucket_id =
 			min_t(unsigned int,
-			      sew_qi_uclamp_min / SEW_QI_BUCKET_DELTA,
+			      kext_qi_uclamp_min / KEXT_QI_BUCKET_DELTA,
 			      (unsigned int)(UCLAMP_BUCKETS - 1));
-		atomic64_inc(&sew_qi_hinted_waits);
+		atomic64_inc(&kext_qi_hinted_waits);
 	}
-	spin_unlock_irqrestore(&sew_qi_hint_lock, irqflags);
+	spin_unlock_irqrestore(&kext_qi_hint_lock, irqflags);
 }
 
-static void sew_qi_wait_end(void *data, u32 flags, u32 bitset)
+static void kext_qi_wait_end(void *data, u32 flags, u32 bitset)
 {
 	struct task_struct *t = current;
 	unsigned long irqflags;
 	int i;
 
 	/* Fast exit: no hinted task in flight (common case). */
-	if (!atomic_read(&sew_qi_active_hints))
+	if (!atomic_read(&kext_qi_active_hints))
 		return;
 
-	spin_lock_irqsave(&sew_qi_hint_lock, irqflags);
-	for (i = 0; i < SEW_QI_HINT_SLOTS; i++) {
-		if (sew_qi_hints[i].tid == t->pid) {
+	spin_lock_irqsave(&kext_qi_hint_lock, irqflags);
+	for (i = 0; i < KEXT_QI_HINT_SLOTS; i++) {
+		if (kext_qi_hints[i].tid == t->pid) {
 			t->uclamp_req[UCLAMP_MIN].value =
-				sew_qi_hints[i].prev_value;
+				kext_qi_hints[i].prev_value;
 			t->uclamp_req[UCLAMP_MIN].bucket_id =
 				min_t(unsigned int,
-				      sew_qi_hints[i].prev_value / SEW_QI_BUCKET_DELTA,
+				      kext_qi_hints[i].prev_value / KEXT_QI_BUCKET_DELTA,
 				      (unsigned int)(UCLAMP_BUCKETS - 1));
-			sew_qi_hints[i].tid = 0;
-			atomic_dec(&sew_qi_active_hints);
+			kext_qi_hints[i].tid = 0;
+			atomic_dec(&kext_qi_active_hints);
 			break;
 		}
 	}
-	spin_unlock_irqrestore(&sew_qi_hint_lock, irqflags);
+	spin_unlock_irqrestore(&kext_qi_hint_lock, irqflags);
 }
 
-static int sew_qi_proc_show(struct seq_file *m, void *v)
+static int kext_qi_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "vip_tgid=%d\nuclamp_min=%u\nhinted_waits=%lld\n",
-		   sew_qi_vip_tgid, sew_qi_uclamp_min,
-		   atomic64_read(&sew_qi_hinted_waits));
+		   kext_qi_vip_tgid, kext_qi_uclamp_min,
+		   atomic64_read(&kext_qi_hinted_waits));
 	return 0;
 }
 
-static int sew_qi_proc_open(struct inode *inode, struct file *file)
+static int kext_qi_proc_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, sew_qi_proc_show, NULL);
+	return single_open(file, kext_qi_proc_show, NULL);
 }
 
-static ssize_t sew_qi_proc_write(struct file *file, const char __user *buf,
+static ssize_t kext_qi_proc_write(struct file *file, const char __user *buf,
 				 size_t count, loff_t *ppos)
 {
 	char tmp[64];
@@ -160,52 +160,52 @@ static ssize_t sew_qi_proc_write(struct file *file, const char __user *buf,
 	if (field == 0) {
 		if (val < 0)
 			return -EINVAL;
-		WRITE_ONCE(sew_qi_vip_tgid, (pid_t)val);
+		WRITE_ONCE(kext_qi_vip_tgid, (pid_t)val);
 	} else {
 		if (val < 0 || val > 1024)
 			return -EINVAL;
-		WRITE_ONCE(sew_qi_uclamp_min, (unsigned int)val);
+		WRITE_ONCE(kext_qi_uclamp_min, (unsigned int)val);
 	}
 	return count;
 }
 
-static const struct proc_ops sew_qi_proc_ops = {
-	.proc_open	= sew_qi_proc_open,
+static const struct proc_ops kext_qi_proc_ops = {
+	.proc_open	= kext_qi_proc_open,
 	.proc_read	= seq_read,
 	.proc_lseek	= seq_lseek,
 	.proc_release	= single_release,
-	.proc_write	= sew_qi_proc_write,
+	.proc_write	= kext_qi_proc_write,
 };
 
-static int __init sew_qos_inherit_init(void)
+static int __init kext_qos_inherit_init(void)
 {
 	int ret;
 
-	ret = register_trace_android_vh_futex_wait_start(sew_qi_wait_start, NULL);
+	ret = register_trace_android_vh_futex_wait_start(kext_qi_wait_start, NULL);
 	if (ret)
 		return ret;
-	ret = register_trace_android_vh_futex_wait_end(sew_qi_wait_end, NULL);
+	ret = register_trace_android_vh_futex_wait_end(kext_qi_wait_end, NULL);
 	if (ret) {
-		unregister_trace_android_vh_futex_wait_start(sew_qi_wait_start, NULL);
+		unregister_trace_android_vh_futex_wait_start(kext_qi_wait_start, NULL);
 		return ret;
 	}
-	if (!proc_create("sew_qos_inherit", 0644, NULL, &sew_qi_proc_ops)) {
-		unregister_trace_android_vh_futex_wait_start(sew_qi_wait_start, NULL);
-		unregister_trace_android_vh_futex_wait_end(sew_qi_wait_end, NULL);
+	if (!proc_create("kext_qos_inherit", 0644, NULL, &kext_qi_proc_ops)) {
+		unregister_trace_android_vh_futex_wait_start(kext_qi_wait_start, NULL);
+		unregister_trace_android_vh_futex_wait_end(kext_qi_wait_end, NULL);
 		return -ENOMEM;
 	}
 	return 0;
 }
 
-static void __exit sew_qos_inherit_exit(void)
+static void __exit kext_qos_inherit_exit(void)
 {
-	unregister_trace_android_vh_futex_wait_start(sew_qi_wait_start, NULL);
-	unregister_trace_android_vh_futex_wait_end(sew_qi_wait_end, NULL);
+	unregister_trace_android_vh_futex_wait_start(kext_qi_wait_start, NULL);
+	unregister_trace_android_vh_futex_wait_end(kext_qi_wait_end, NULL);
 	tracepoint_synchronize_unregister();
-	remove_proc_entry("sew_qos_inherit", NULL);
+	remove_proc_entry("kext_qos_inherit", NULL);
 }
 
-module_init(sew_qos_inherit_init);
-module_exit(sew_qos_inherit_exit);
+module_init(kext_qos_inherit_init);
+module_exit(kext_qos_inherit_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Sew minimal futex QOS-inheritance (xr_qi reduced port, uclamp hint only)");
+MODULE_DESCRIPTION("Kext minimal futex QOS-inheritance (xr_qi reduced port, uclamp hint only)");

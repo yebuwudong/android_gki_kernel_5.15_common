@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * sew_rss_monitor: observe RSS and accumulated runtime of a tgid
+ * kext_rss_monitor: observe RSS and accumulated runtime of a tgid
  * allowlist via a dynamic probe on the "sched_stat_runtime" tracepoint
  * (located by name with for_each_kernel_tracepoint; chosen over
  * sched_switch because it provides the per-task runtime delta directly,
@@ -13,9 +13,9 @@
  * tgid_list keeps the callback at one zero-entry scan (idle).
  *
  * Controls: tgid_list (comma-separated pids; writable at
- * /sys/module/sew_rss_monitor/parameters/tgid_list, rewritable at
+ * /sys/module/kext_rss_monitor/parameters/tgid_list, rewritable at
  * runtime, resets stats), rss_threshold_kb, sample_ms. Stats are read
- * from /dev/sew_rss_monitor.
+ * from /dev/kext_rss_monitor.
  */
 
 #include <linux/module.h>
@@ -34,19 +34,19 @@
 #include <linux/time64.h>
 #include <linux/tracepoint.h>
 
-#define SEW_RSS_MAX_TGIDS 8
+#define KEXT_RSS_MAX_TGIDS 8
 
-static ulong sew_rss_threshold_kb = 512UL * 1024UL;
-module_param_named(rss_threshold_kb, sew_rss_threshold_kb, ulong, 0644);
+static ulong kext_rss_threshold_kb = 512UL * 1024UL;
+module_param_named(rss_threshold_kb, kext_rss_threshold_kb, ulong, 0644);
 MODULE_PARM_DESC(rss_threshold_kb,
 	"RSS report threshold in KB (default 524288)");
 
-static uint sew_sample_ms = 1000;
-module_param_named(sample_ms, sew_sample_ms, uint, 0644);
+static uint kext_sample_ms = 1000;
+module_param_named(sample_ms, kext_sample_ms, uint, 0644);
 MODULE_PARM_DESC(sample_ms,
 	"min ms between RSS samples per tgid (default 1000)");
 
-struct sew_rss_tgid {
+struct kext_rss_tgid {
 	int tgid;
 	atomic64_t runtime_ns;	/* sum of tracepoint runtime deltas */
 	atomic64_t events;
@@ -55,20 +55,20 @@ struct sew_rss_tgid {
 	atomic64_t reports;
 };
 
-static struct sew_rss_tgid sew_tgids[SEW_RSS_MAX_TGIDS];
-static int sew_tgid_count;
+static struct kext_rss_tgid kext_tgids[KEXT_RSS_MAX_TGIDS];
+static int kext_tgid_count;
 /* serializes list rewrites against each other; the probe reads the
  * list locklessly (see the race note above the probe) */
-static DEFINE_SPINLOCK(sew_tgids_lock);
+static DEFINE_SPINLOCK(kext_tgids_lock);
 
-static struct tracepoint *sew_stat_runtime_tp;
+static struct tracepoint *kext_stat_runtime_tp;
 
 /* all-or-nothing parse: a malformed, range-syntax, or over-long list
- * (> SEW_RSS_MAX_TGIDS entries) is rejected and the previous list
+ * (> KEXT_RSS_MAX_TGIDS entries) is rejected and the previous list
  * stays armed; the whole parse happens on a stack copy */
-static int sew_tgid_list_set(const char *val, const struct kernel_param *kp)
+static int kext_tgid_list_set(const char *val, const struct kernel_param *kp)
 {
-	int parsed[SEW_RSS_MAX_TGIDS];
+	int parsed[KEXT_RSS_MAX_TGIDS];
 	int n = 0, rc, i;
 	char buf[128];
 	char *p;
@@ -81,7 +81,7 @@ static int sew_tgid_list_set(const char *val, const struct kernel_param *kp)
 	strscpy(buf, val, sizeof(buf));
 	p = strim(buf);
 
-	while (n < SEW_RSS_MAX_TGIDS && *p) {
+	while (n < KEXT_RSS_MAX_TGIDS && *p) {
 		rc = get_option(&p, &parsed[n]);
 		if (rc == 0) {
 			if (*p)
@@ -97,42 +97,42 @@ static int sew_tgid_list_set(const char *val, const struct kernel_param *kp)
 			break;	/* no comma follows */
 	}
 	if (*p)
-		return -EINVAL;	/* more than SEW_RSS_MAX_TGIDS entries */
+		return -EINVAL;	/* more than KEXT_RSS_MAX_TGIDS entries */
 
-	spin_lock_irqsave(&sew_tgids_lock, flags);
-	memset(sew_tgids, 0, sizeof(sew_tgids));
+	spin_lock_irqsave(&kext_tgids_lock, flags);
+	memset(kext_tgids, 0, sizeof(kext_tgids));
 	for (i = 0; i < n; i++)
-		sew_tgids[i].tgid = parsed[i];
-	sew_tgid_count = n;
-	spin_unlock_irqrestore(&sew_tgids_lock, flags);
+		kext_tgids[i].tgid = parsed[i];
+	kext_tgid_count = n;
+	spin_unlock_irqrestore(&kext_tgids_lock, flags);
 	return 0;
 }
 
-static int sew_tgid_list_get(char *buffer, const struct kernel_param *kp)
+static int kext_tgid_list_get(char *buffer, const struct kernel_param *kp)
 {
 	int i, len = 0;
 	unsigned long flags;
 
-	spin_lock_irqsave(&sew_tgids_lock, flags);
-	for (i = 0; i < sew_tgid_count && i < SEW_RSS_MAX_TGIDS; i++)
+	spin_lock_irqsave(&kext_tgids_lock, flags);
+	for (i = 0; i < kext_tgid_count && i < KEXT_RSS_MAX_TGIDS; i++)
 		len += scnprintf(buffer + len, PAGE_SIZE - len, "%s%d",
-				 i ? "," : "", sew_tgids[i].tgid);
-	spin_unlock_irqrestore(&sew_tgids_lock, flags);
+				 i ? "," : "", kext_tgids[i].tgid);
+	spin_unlock_irqrestore(&kext_tgids_lock, flags);
 	buffer[len] = '\0';
 	return len;
 }
 
-static const struct kernel_param_ops sew_tgid_list_ops = {
-	.set = sew_tgid_list_set,
-	.get = sew_tgid_list_get,
+static const struct kernel_param_ops kext_tgid_list_ops = {
+	.set = kext_tgid_list_set,
+	.get = kext_tgid_list_get,
 };
-module_param_cb(tgid_list, &sew_tgid_list_ops, NULL, 0644);
+module_param_cb(tgid_list, &kext_tgid_list_ops, NULL, 0644);
 MODULE_PARM_DESC(tgid_list,
 	"comma-separated tgid allowlist, e.g. \"1234,5678\" (empty = idle)");
 
 /* task_lock() is a spinlock, safe in the preempt-disabled probe; it
  * pins p->mm against exit_mmap() teardown racing on another CPU */
-static unsigned long sew_task_rss_kb(struct task_struct *p)
+static unsigned long kext_task_rss_kb(struct task_struct *p)
 {
 	struct mm_struct *mm;
 	unsigned long pages;
@@ -157,22 +157,22 @@ static unsigned long sew_task_rss_kb(struct task_struct *p)
  * entries or skip just-cleared ones; stat counters are atomics, so a
  * rewrite only races the intentional counter reset.
  */
-static void sew_sched_stat_runtime_probe(void *data, struct task_struct *p,
+static void kext_sched_stat_runtime_probe(void *data, struct task_struct *p,
 					 u64 runtime, u64 vruntime)
 {
-	struct sew_rss_tgid *e = NULL;
+	struct kext_rss_tgid *e = NULL;
 	unsigned long rss_kb;
 	u64 now, old, period;
 	int count, i, tgid;
 
-	count = READ_ONCE(sew_tgid_count);
+	count = READ_ONCE(kext_tgid_count);
 	if (!count)
 		return;
 
 	tgid = p->tgid;
-	for (i = 0; i < count && i < SEW_RSS_MAX_TGIDS; i++) {
-		if (READ_ONCE(sew_tgids[i].tgid) == tgid) {
-			e = &sew_tgids[i];
+	for (i = 0; i < count && i < KEXT_RSS_MAX_TGIDS; i++) {
+		if (READ_ONCE(kext_tgids[i].tgid) == tgid) {
+			e = &kext_tgids[i];
 			break;
 		}
 	}
@@ -185,122 +185,122 @@ static void sew_sched_stat_runtime_probe(void *data, struct task_struct *p,
 	/* throttle RSS sampling: at most one check per sample_ms per tgid
 	 * (minimum one jiffy); cmpxchg arbitrates between CPUs running
 	 * tasks of the same tgid */
-	period = msecs_to_jiffies(sew_sample_ms);
+	period = msecs_to_jiffies(kext_sample_ms);
 	if (period == 0)
 		period = 1;
 	now = (u64)jiffies;
 	old = atomic64_read(&e->next_sample);
 	if (time_after64(now, old) &&
 	    atomic64_cmpxchg(&e->next_sample, old, now + period) == old) {
-		rss_kb = sew_task_rss_kb(p);
+		rss_kb = kext_task_rss_kb(p);
 		atomic64_set(&e->rss_kb, (u64)rss_kb);
-		if (rss_kb > sew_rss_threshold_kb) {
+		if (rss_kb > kext_rss_threshold_kb) {
 			atomic64_inc(&e->reports);
 			printk_ratelimited(KERN_INFO
-				"sew_rss_monitor: tgid=%d comm=%s pid=%d "
+				"kext_rss_monitor: tgid=%d comm=%s pid=%d "
 				"rss=%luKB runtime=%llums threshold=%luKB\n",
 				tgid, p->comm, p->pid, rss_kb,
 				(unsigned long long)div64_u64(
 					atomic64_read(&e->runtime_ns),
 					NSEC_PER_MSEC),
-				sew_rss_threshold_kb);
+				kext_rss_threshold_kb);
 		}
 	}
 }
 
-static void sew_find_stat_runtime_tp(struct tracepoint *tp, void *priv)
+static void kext_find_stat_runtime_tp(struct tracepoint *tp, void *priv)
 {
 	if (!strcmp(tp->name, "sched_stat_runtime"))
-		sew_stat_runtime_tp = tp;
+		kext_stat_runtime_tp = tp;
 }
 
-static int sew_rss_show(struct seq_file *m, void *v)
+static int kext_rss_show(struct seq_file *m, void *v)
 {
 	unsigned long long runtime_ms;
 	int count, i;
 
-	seq_printf(m, "threshold_kb: %lu\n", sew_rss_threshold_kb);
-	seq_printf(m, "sample_ms: %u\n", sew_sample_ms);
-	count = READ_ONCE(sew_tgid_count);
+	seq_printf(m, "threshold_kb: %lu\n", kext_rss_threshold_kb);
+	seq_printf(m, "sample_ms: %u\n", kext_sample_ms);
+	count = READ_ONCE(kext_tgid_count);
 	seq_printf(m, "tgid_count: %d\n", count);
 
-	for (i = 0; i < count && i < SEW_RSS_MAX_TGIDS; i++) {
+	for (i = 0; i < count && i < KEXT_RSS_MAX_TGIDS; i++) {
 		runtime_ms = div64_u64(
-			atomic64_read(&sew_tgids[i].runtime_ns), NSEC_PER_MSEC);
+			atomic64_read(&kext_tgids[i].runtime_ns), NSEC_PER_MSEC);
 		seq_printf(m,
 			   "tgid=%d runtime_ms=%llu events=%llu rss_kb=%llu reports=%llu\n",
-			   READ_ONCE(sew_tgids[i].tgid), runtime_ms,
-			   (unsigned long long)atomic64_read(&sew_tgids[i].events),
-			   (unsigned long long)atomic64_read(&sew_tgids[i].rss_kb),
-			   (unsigned long long)atomic64_read(&sew_tgids[i].reports));
+			   READ_ONCE(kext_tgids[i].tgid), runtime_ms,
+			   (unsigned long long)atomic64_read(&kext_tgids[i].events),
+			   (unsigned long long)atomic64_read(&kext_tgids[i].rss_kb),
+			   (unsigned long long)atomic64_read(&kext_tgids[i].reports));
 	}
 	return 0;
 }
 
-static int sew_rss_open(struct inode *inode, struct file *file)
+static int kext_rss_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, sew_rss_show, NULL);
+	return single_open(file, kext_rss_show, NULL);
 }
 
-static const struct file_operations sew_rss_fops = {
+static const struct file_operations kext_rss_fops = {
 	.owner = THIS_MODULE,
-	.open = sew_rss_open,
+	.open = kext_rss_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
 	.release = single_release,
 };
 
-static struct miscdevice sew_rss_misc = {
+static struct miscdevice kext_rss_misc = {
 	.minor = MISC_DYNAMIC_MINOR,
-	.name = "sew_rss_monitor",
-	.fops = &sew_rss_fops,
+	.name = "kext_rss_monitor",
+	.fops = &kext_rss_fops,
 };
 
-static int __init sew_rss_monitor_init(void)
+static int __init kext_rss_monitor_init(void)
 {
 	int ret;
 
-	for_each_kernel_tracepoint(sew_find_stat_runtime_tp, NULL);
-	if (!sew_stat_runtime_tp) {
-		pr_err("sew_rss_monitor: sched_stat_runtime tracepoint not found\n");
+	for_each_kernel_tracepoint(kext_find_stat_runtime_tp, NULL);
+	if (!kext_stat_runtime_tp) {
+		pr_err("kext_rss_monitor: sched_stat_runtime tracepoint not found\n");
 		return -ENOENT;
 	}
 
-	ret = misc_register(&sew_rss_misc);
+	ret = misc_register(&kext_rss_misc);
 	if (ret) {
-		pr_err("sew_rss_monitor: misc_register failed: %d\n", ret);
+		pr_err("kext_rss_monitor: misc_register failed: %d\n", ret);
 		return ret;
 	}
 
-	ret = tracepoint_probe_register(sew_stat_runtime_tp,
-					sew_sched_stat_runtime_probe, NULL);
+	ret = tracepoint_probe_register(kext_stat_runtime_tp,
+					kext_sched_stat_runtime_probe, NULL);
 	if (ret) {
-		pr_err("sew_rss_monitor: tracepoint probe registration failed: %d\n",
+		pr_err("kext_rss_monitor: tracepoint probe registration failed: %d\n",
 			ret);
-		misc_deregister(&sew_rss_misc);
+		misc_deregister(&kext_rss_misc);
 		return ret;
 	}
 
-	pr_info("sew_rss_monitor: armed, %d tgid(s), threshold %luKB\n",
-		sew_tgid_count, sew_rss_threshold_kb);
+	pr_info("kext_rss_monitor: armed, %d tgid(s), threshold %luKB\n",
+		kext_tgid_count, kext_rss_threshold_kb);
 	return 0;
 }
 
-static void __exit sew_rss_monitor_exit(void)
+static void __exit kext_rss_monitor_exit(void)
 {
-	tracepoint_probe_unregister(sew_stat_runtime_tp,
-				    sew_sched_stat_runtime_probe, NULL);
+	tracepoint_probe_unregister(kext_stat_runtime_tp,
+				    kext_sched_stat_runtime_probe, NULL);
 	/* guarantee no CPU is still inside our probe before the code and
 	 * the stat storage go away */
 	tracepoint_synchronize_unregister();
-	misc_deregister(&sew_rss_misc);
-	sew_stat_runtime_tp = NULL;
-	pr_info("sew_rss_monitor: unregistered\n");
+	misc_deregister(&kext_rss_misc);
+	kext_stat_runtime_tp = NULL;
+	pr_info("kext_rss_monitor: unregistered\n");
 }
 
-module_init(sew_rss_monitor_init);
-module_exit(sew_rss_monitor_exit);
+module_init(kext_rss_monitor_init);
+module_exit(kext_rss_monitor_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Sew RSS/runtime monitor for a tgid allowlist");
-MODULE_AUTHOR("Sew");
+MODULE_DESCRIPTION("Kext RSS/runtime monitor for a tgid allowlist");
+MODULE_AUTHOR("Kext");

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * sew_mmap_bypass: bypass direct-reclaim throttling for userspace allocation
+ * kext_mmap_bypass: bypass direct-reclaim throttling for userspace allocation
  * paths to reduce mmap/page-fault latency under memory pressure.
  *
  * Backported hook (android_vh_throttle_direct_reclaim_bypass). It fires in
@@ -18,7 +18,7 @@
 #include <linux/string.h>
 #include <trace/hooks/vmscan.h>
 
-static bool sew_mmap_bypass_enabled = true;
+static bool kext_mmap_bypass_enabled = true;
 
 /*
  * R7.3: bypass is scoped to interactive cpuset groups (Android /dev/cpuset
@@ -27,7 +27,7 @@ static bool sew_mmap_bypass_enabled = true;
  * reclaim storm. Exact-match names; unknown/root groups fall back to
  * throttled (conservative).
  */
-static const char * const sew_bypass_cpuset[] = {
+static const char * const kext_bypass_cpuset[] = {
 	"top-app", "foreground", "system", "system-background", NULL
 };
 
@@ -40,7 +40,7 @@ static const char * const sew_bypass_cpuset[] = {
  * is stable for the lifetime of the node.
  */
 #if IS_ENABLED(CONFIG_CPUSETS)
-static bool sew_task_in_bypass_cpuset(struct task_struct *t)
+static bool kext_task_in_bypass_cpuset(struct task_struct *t)
 {
 	struct cgroup_subsys_state *css;
 	struct kernfs_node *kn;
@@ -60,8 +60,8 @@ static bool sew_task_in_bypass_cpuset(struct task_struct *t)
 	name = kn->name;
 	if (!name)
 		goto out;
-	for (i = 0; sew_bypass_cpuset[i]; i++) {
-		if (!strcmp(name, sew_bypass_cpuset[i])) {
+	for (i = 0; kext_bypass_cpuset[i]; i++) {
+		if (!strcmp(name, kext_bypass_cpuset[i])) {
 			ret = true;
 			break;
 		}
@@ -71,14 +71,14 @@ out:
 	return ret;
 }
 #else
-static bool sew_task_in_bypass_cpuset(struct task_struct *t) { return false; }
+static bool kext_task_in_bypass_cpuset(struct task_struct *t) { return false; }
 #endif
-module_param_named(enabled, sew_mmap_bypass_enabled, bool, 0644);
+module_param_named(enabled, kext_mmap_bypass_enabled, bool, 0644);
 MODULE_PARM_DESC(enabled, "Enable direct-reclaim throttle bypass (default 1)");
 
-static void sew_mmap_throttle_bypass(void *data, bool *bypass)
+static void kext_mmap_throttle_bypass(void *data, bool *bypass)
 {
-	if (!sew_mmap_bypass_enabled)
+	if (!kext_mmap_bypass_enabled)
 		return;
 
 	/* Reclaimers (PF_MEMALLOC) must never bypass: they would recurse into
@@ -87,36 +87,36 @@ static void sew_mmap_throttle_bypass(void *data, bool *bypass)
 	if (current->flags & PF_MEMALLOC)
 		return;
 
-	if (!sew_task_in_bypass_cpuset(current))
+	if (!kext_task_in_bypass_cpuset(current))
 		return;
 
 	*bypass = true;
 }
 
-static int __init sew_mmap_bypass_init(void)
+static int __init kext_mmap_bypass_init(void)
 {
 	int ret;
 
 	ret = register_trace_android_vh_throttle_direct_reclaim_bypass(
-		sew_mmap_throttle_bypass, NULL);
+		kext_mmap_throttle_bypass, NULL);
 	if (ret)
 		return ret;
 
-	pr_info("sew_mmap_bypass: registered (enabled=%d, cpuset-scoped)\n",
-		sew_mmap_bypass_enabled ? 1 : 0);
+	pr_info("kext_mmap_bypass: registered (enabled=%d, cpuset-scoped)\n",
+		kext_mmap_bypass_enabled ? 1 : 0);
 	return 0;
 }
 
-static void __exit sew_mmap_bypass_exit(void)
+static void __exit kext_mmap_bypass_exit(void)
 {
 	unregister_trace_android_vh_throttle_direct_reclaim_bypass(
-		sew_mmap_throttle_bypass, NULL);
-	pr_info("sew_mmap_bypass: unregistered\n");
+		kext_mmap_throttle_bypass, NULL);
+	pr_info("kext_mmap_bypass: unregistered\n");
 }
 
-module_init(sew_mmap_bypass_init);
-module_exit(sew_mmap_bypass_exit);
+module_init(kext_mmap_bypass_init);
+module_exit(kext_mmap_bypass_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Sew mmap direct-reclaim throttle bypass");
-MODULE_AUTHOR("Sew");
+MODULE_DESCRIPTION("Kext mmap direct-reclaim throttle bypass");
+MODULE_AUTHOR("Kext");

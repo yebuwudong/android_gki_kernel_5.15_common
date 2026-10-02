@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * sew_unfairmem: relax the allocation watermark for flagged tasks so the
+ * kext_unfairmem: relax the allocation watermark for flagged tasks so the
  * renderer / scene threads can dip into the reserve instead of stalling
  * in reclaim while a frame deadline is pending.
  *
@@ -11,7 +11,7 @@
  *
  * The slab side (vh_shrink_slab_bypass) is NOT registered here: mm/slabd.c
  * consumes it already, and the VIP check is merged into its callback via
- * sew_unfairmem_is_vip() below (single-consumer discipline; avoids the
+ * kext_unfairmem_is_vip() below (single-consumer discipline; avoids the
  * double-registration async residue).
  *
  * Port of the Xiaomi OS4 unfairmem module idea ("adjust min watermark
@@ -27,33 +27,33 @@
 #include <linux/sched.h>
 #include <trace/hooks/mm.h>
 
-static pid_t sew_unfair_sf_pid;
-static pid_t sew_unfair_scene_tid;
+static pid_t kext_unfair_sf_pid;
+static pid_t kext_unfair_scene_tid;
 
 /* Bounded relax: at most 50% below the computed mark. */
-static unsigned int sew_unfair_relax_pct = 50;
+static unsigned int kext_unfair_relax_pct = 50;
 
 /*
- * VIP check for mm/slabd.c, registered through the sew_slabd_vip_check
+ * VIP check for mm/slabd.c, registered through the kext_slabd_vip_check
  * function pointer (slabd is built-in; direct symbol reference would
  * not link when this is a module).
  */
-static bool sew_unfairmem_is_vip(struct task_struct *t)
+static bool kext_unfairmem_is_vip(struct task_struct *t)
 {
 	if (!t)
 		return false;
-	if (!sew_unfair_sf_pid && !sew_unfair_scene_tid)
+	if (!kext_unfair_sf_pid && !kext_unfair_scene_tid)
 		return false;
-	return task_tgid_nr(t) == sew_unfair_sf_pid ||
-	       t->pid == sew_unfair_scene_tid;
+	return task_tgid_nr(t) == kext_unfair_sf_pid ||
+	       t->pid == kext_unfair_scene_tid;
 }
 
-static void sew_unfair_wmark(void *data, unsigned int alloc_flags,
+static void kext_unfair_wmark(void *data, unsigned int alloc_flags,
 			     unsigned long *page_wmark)
 {
 	unsigned long mark, relaxed;
 
-	if (!page_wmark || !sew_unfairmem_is_vip(current))
+	if (!page_wmark || !kext_unfairmem_is_vip(current))
 		return;
 
 	/*
@@ -64,26 +64,26 @@ static void sew_unfair_wmark(void *data, unsigned int alloc_flags,
 	 * Bounded: never below half of the computed mark.
 	 */
 	mark = *page_wmark;
-	relaxed = mark - mult_frac(mark, sew_unfair_relax_pct, 100);
+	relaxed = mark - mult_frac(mark, kext_unfair_relax_pct, 100);
 	if (relaxed < mark / 2)
 		relaxed = mark / 2;
 	*page_wmark = relaxed;
 }
 
-static int sew_unfair_proc_show(struct seq_file *m, void *v)
+static int kext_unfair_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "sf_pid=%d\nscene_tid=%d\nrelax_pct=%u\n",
-		   sew_unfair_sf_pid, sew_unfair_scene_tid,
-		   sew_unfair_relax_pct);
+		   kext_unfair_sf_pid, kext_unfair_scene_tid,
+		   kext_unfair_relax_pct);
 	return 0;
 }
 
-static int sew_unfair_proc_open(struct inode *inode, struct file *file)
+static int kext_unfair_proc_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, sew_unfair_proc_show, NULL);
+	return single_open(file, kext_unfair_proc_show, NULL);
 }
 
-static ssize_t sew_unfair_proc_write(struct file *file,
+static ssize_t kext_unfair_proc_write(struct file *file,
 				     const char __user *buf, size_t count,
 				     loff_t *ppos)
 {
@@ -115,56 +115,56 @@ static ssize_t sew_unfair_proc_write(struct file *file,
 	case 0:
 		if (val < 0)
 			return -EINVAL;
-		WRITE_ONCE(sew_unfair_sf_pid, (pid_t)val);
+		WRITE_ONCE(kext_unfair_sf_pid, (pid_t)val);
 		break;
 	case 1:
 		if (val < 0)
 			return -EINVAL;
-		WRITE_ONCE(sew_unfair_scene_tid, (pid_t)val);
+		WRITE_ONCE(kext_unfair_scene_tid, (pid_t)val);
 		break;
 	case 2:
 		if (val < 0 || val > 50)
 			return -EINVAL;
-		WRITE_ONCE(sew_unfair_relax_pct, (unsigned int)val);
+		WRITE_ONCE(kext_unfair_relax_pct, (unsigned int)val);
 		break;
 	}
 	return count;
 }
 
-static const struct proc_ops sew_unfair_proc_ops = {
-	.proc_open	= sew_unfair_proc_open,
+static const struct proc_ops kext_unfair_proc_ops = {
+	.proc_open	= kext_unfair_proc_open,
 	.proc_read	= seq_read,
 	.proc_lseek	= seq_lseek,
 	.proc_release	= single_release,
-	.proc_write	= sew_unfair_proc_write,
+	.proc_write	= kext_unfair_proc_write,
 };
 
-extern bool (*sew_slabd_vip_check)(struct task_struct *t);
+extern bool (*kext_slabd_vip_check)(struct task_struct *t);
 
-static int __init sew_unfairmem_init(void)
+static int __init kext_unfairmem_init(void)
 {
 	int ret;
 
-	if (!proc_create("sew_unfairmem", 0644, NULL, &sew_unfair_proc_ops))
+	if (!proc_create("kext_unfairmem", 0644, NULL, &kext_unfair_proc_ops))
 		return -ENOMEM;
-	ret = register_trace_android_vh_get_page_wmark(sew_unfair_wmark, NULL);
+	ret = register_trace_android_vh_get_page_wmark(kext_unfair_wmark, NULL);
 	if (ret) {
-		remove_proc_entry("sew_unfairmem", NULL);
+		remove_proc_entry("kext_unfairmem", NULL);
 		return ret;
 	}
-	WRITE_ONCE(sew_slabd_vip_check, sew_unfairmem_is_vip);
+	WRITE_ONCE(kext_slabd_vip_check, kext_unfairmem_is_vip);
 	return 0;
 }
 
-static void __exit sew_unfairmem_exit(void)
+static void __exit kext_unfairmem_exit(void)
 {
-	WRITE_ONCE(sew_slabd_vip_check, NULL);
-	unregister_trace_android_vh_get_page_wmark(sew_unfair_wmark, NULL);
+	WRITE_ONCE(kext_slabd_vip_check, NULL);
+	unregister_trace_android_vh_get_page_wmark(kext_unfair_wmark, NULL);
 	tracepoint_synchronize_unregister();
-	remove_proc_entry("sew_unfairmem", NULL);
+	remove_proc_entry("kext_unfairmem", NULL);
 }
 
-module_init(sew_unfairmem_init);
-module_exit(sew_unfairmem_exit);
+module_init(kext_unfairmem_init);
+module_exit(kext_unfairmem_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Sew unfairmem: bounded watermark relax for flagged (sf/scene) tasks");
+MODULE_DESCRIPTION("Kext unfairmem: bounded watermark relax for flagged (sf/scene) tasks");

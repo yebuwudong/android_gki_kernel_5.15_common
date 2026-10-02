@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * sew_dynamic_readahead: per-uid control of fault-around and readahead
+ * kext_dynamic_readahead: per-uid control of fault-around and readahead
  * scale, reduced port of the Xiaomi OS4 dynamic_readahead module
  * (ra_order bypass deliberately not ported; see plan T-007).
  *
@@ -19,12 +19,12 @@
 #include <linux/sched.h>
 #include <trace/hooks/mm.h>
 
-static bool sew_ra_enable;
-static int sew_ra_fault_around_uid;
-static int sew_ra_scale_uid = -1;
-static unsigned int sew_ra_scale_pct = 100;
+static bool kext_ra_enable;
+static int kext_ra_fault_around_uid;
+static int kext_ra_scale_uid = -1;
+static unsigned int kext_ra_scale_pct = 100;
 
-static bool sew_ra_match(struct task_struct *t, int uid)
+static bool kext_ra_match(struct task_struct *t, int uid)
 {
 	kuid_t u;
 	unsigned int val;
@@ -36,71 +36,71 @@ static bool sew_ra_match(struct task_struct *t, int uid)
 	return (int)val == uid;
 }
 
-static void sew_ra_fault_around(void *data, struct vm_fault *vmf,
+static void kext_ra_fault_around(void *data, struct vm_fault *vmf,
 				bool *should_around)
 {
-	if (!sew_ra_enable)
+	if (!kext_ra_enable)
 		return;
-	if (sew_ra_match(current, sew_ra_fault_around_uid))
+	if (kext_ra_match(current, kext_ra_fault_around_uid))
 		*should_around = false;
 }
 
-static void sew_ra_max_page(void *data, struct readahead_control *ractl,
+static void kext_ra_max_page(void *data, struct readahead_control *ractl,
 			    unsigned long *max_pages)
 {
 	unsigned long scaled;
 
-	if (!sew_ra_enable || !max_pages)
+	if (!kext_ra_enable || !max_pages)
 		return;
-	if (!sew_ra_match(current, sew_ra_scale_uid))
+	if (!kext_ra_match(current, kext_ra_scale_uid))
 		return;
-	if (sew_ra_scale_pct == 100 || !*max_pages)
+	if (kext_ra_scale_pct == 100 || !*max_pages)
 		return;
 
-	scaled = mult_frac(*max_pages, sew_ra_scale_pct, 100);
+	scaled = mult_frac(*max_pages, kext_ra_scale_pct, 100);
 	if (scaled < 1)
 		scaled = 1;
 	*max_pages = scaled;
 }
 
-static int __init sew_dynamic_readahead_init(void)
+static int __init kext_dynamic_readahead_init(void)
 {
 	int ret;
 
 	ret = register_trace_android_vh_should_fault_around(
-		sew_ra_fault_around, NULL);
+		kext_ra_fault_around, NULL);
 	if (ret)
 		return ret;
 	ret = register_trace_android_vh_ra_tuning_max_page(
-		sew_ra_max_page, NULL);
+		kext_ra_max_page, NULL);
 	if (ret) {
 		unregister_trace_android_vh_should_fault_around(
-			sew_ra_fault_around, NULL);
+			kext_ra_fault_around, NULL);
 		return ret;
 	}
 	return 0;
 }
 
-static void __exit sew_dynamic_readahead_exit(void)
+static void __exit kext_dynamic_readahead_exit(void)
 {
 	unregister_trace_android_vh_should_fault_around(
-		sew_ra_fault_around, NULL);
+		kext_ra_fault_around, NULL);
 	unregister_trace_android_vh_ra_tuning_max_page(
-		sew_ra_max_page, NULL);
+		kext_ra_max_page, NULL);
 	tracepoint_synchronize_unregister();
 }
 
-module_init(sew_dynamic_readahead_init);
-module_exit(sew_dynamic_readahead_exit);
+module_init(kext_dynamic_readahead_init);
+module_exit(kext_dynamic_readahead_exit);
 
-module_param_named(enable, sew_ra_enable, bool, 0644);
+module_param_named(enable, kext_ra_enable, bool, 0644);
 MODULE_PARM_DESC(enable, "enable dynamic readahead overrides (default false)");
-module_param_named(fault_around_uid, sew_ra_fault_around_uid, int, 0644);
+module_param_named(fault_around_uid, kext_ra_fault_around_uid, int, 0644);
 MODULE_PARM_DESC(fault_around_uid, "uid whose fault_around is disabled (0 = none)");
-module_param_named(ra_scale_uid, sew_ra_scale_uid, int, 0644);
+module_param_named(ra_scale_uid, kext_ra_scale_uid, int, 0644);
 MODULE_PARM_DESC(ra_scale_uid, "uid whose readahead window is scaled (-1 = none)");
-module_param_named(ra_scale_pct, sew_ra_scale_pct, uint, 0644);
+module_param_named(ra_scale_pct, kext_ra_scale_pct, uint, 0644);
 MODULE_PARM_DESC(ra_scale_pct, "readahead window scale percent for ra_scale_uid (1..200)");
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Sew dynamic readahead: per-uid fault_around/readahead control (reduced port)");
+MODULE_DESCRIPTION("Kext dynamic readahead: per-uid fault_around/readahead control (reduced port)");

@@ -1281,7 +1281,7 @@ static enum page_references page_check_references(struct page *page,
 	bool trylock_fail = false;
 	int ret = 0;
 
-	trace_android_vh_sew_page_should_be_protected(page, sc->nr_scanned,
+	trace_android_vh_kext_page_should_be_protected(page, sc->nr_scanned,
 						     sc->priority,
 						     &sc->android_vendor_data1,
 						     &should_protect);
@@ -2456,7 +2456,7 @@ static void shrink_active_list(unsigned long nr_to_scan,
 			}
 		}
 
-		trace_android_vh_sew_page_should_be_protected(page, sc->nr_scanned,
+		trace_android_vh_kext_page_should_be_protected(page, sc->nr_scanned,
 							     sc->priority,
 							     &sc->android_vendor_data1,
 							     &should_protect);

@@ -179,7 +179,7 @@ void bootprof_initcall(initcall_t fn, unsigned long long ts)
 
 #ifndef MODULE
 /*Build-in*/
-/* Sew note: exported but unused in-tree (the upstream driver-core
+/* Kext note: exported but unused in-tree (the upstream driver-core
  * hook was not carried over by this import); harmless dead export. */
 void bootprof_probe(unsigned long long ts, struct device *dev,
 			   struct device_driver *drv, unsigned long probe)
@@ -560,7 +560,7 @@ static void __exit bootprof_exit(void)
 	}
 
 	/*
-	 * Sew note (upstream defect, fixed here): in module mode the
+	 * Kext note (upstream defect, fixed here): in module mode the
 	 * buffers are allocated at init but log_count stays 0 until an
 	 * event is logged, so the original conditional skipped the
 	 * kfree entirely — every rmmod leaked bootprof[0] (and the

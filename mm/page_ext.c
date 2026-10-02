@@ -85,7 +85,7 @@ static struct page_ext_operations *page_ext_ops[] = {
 	&page_pinner_ops,
 #endif
 	/*
-	 * Sew clients must stay last: page_ext offsets are assigned in array
+	 * Kext clients must stay last: page_ext offsets are assigned in array
 	 * order, so inserting ahead of the upstream entries shifts
 	 * page_owner/page_pinner offsets and changes lookup_page_ext ABI.
 	 */

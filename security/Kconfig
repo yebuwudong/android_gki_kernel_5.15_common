@@ -264,13 +264,13 @@ source "security/safesetid/Kconfig"
 source "security/lockdown/Kconfig"
 source "security/landlock/Kconfig"
 
-config SEW_AUDIT_LSM
-	bool "Sew module load audit LSM"
+config KEXT_AUDIT_LSM
+	bool "Kext module load audit LSM"
 	depends on SECURITY
 	default y
 	help
 	  Block loading of kernel modules that duplicate functionality built
-	  into the Sew kernel (binder_prio, moon_*, kshrink_* prefixes), from
+	  into the Kext kernel (binder_prio, moon_*, kshrink_* prefixes), from
 	  system partitions only. finit_module() covers the Android init
 	  modules.load path; the older init_module() memory path is not
 	  intercepted.

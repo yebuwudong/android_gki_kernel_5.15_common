@@ -25,7 +25,7 @@ DECLARE_HOOK(android_vh_handle_failed_page_trylock,
 	TP_PROTO(struct list_head *page_list),
 	TP_ARGS(page_list));
 /*
- * Sew-private MGLRU counterpart of the above. The legacy hook is only reached
+ * Kext-private MGLRU counterpart of the above. The legacy hook is only reached
  * from shrink_inactive_list(); this one fires from evict_pages() so async
  * lruvec reclaim also works when MGLRU is enabled. Kept as a separate hook
  * because the two paths differ in NR_ISOLATED_* accounting.

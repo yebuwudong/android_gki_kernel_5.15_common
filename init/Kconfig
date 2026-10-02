@@ -839,20 +839,20 @@ config GENERIC_SCHED_CLOCK
 
 menu "Scheduler features"
 
-config SEW_RTLOAD
-	tristate "Sew RT load observer (kprobe on __sched_setscheduler)"
+config KEXT_RTLOAD
+	tristate "Kext RT load observer (kprobe on __sched_setscheduler)"
 	depends on KPROBES && ARM64
 	default n
 	help
 	  Count SCHED_FIFO/SCHED_RR policy requests through a kprobe on
 	  __sched_setscheduler and expose the counters through
-	  /dev/sew_rtload. Observation only; no scheduling behavior is
-	  changed. (Module lives in kernel/sched/sew_rtload.c; the config
-	  sits with the Sew family because kernel/sched/ has no Kconfig of
+	  /dev/kext_rtload. Observation only; no scheduling behavior is
+	  changed. (Module lives in kernel/sched/kext_rtload.c; the config
+	  sits with the Kext family because kernel/sched/ has no Kconfig of
 	  its own.)
 
 config SCHED_YIELD_PENALTY
-	tristate "Sew yield penalty"
+	tristate "Kext yield penalty"
 	depends on ANDROID_VENDOR_HOOKS
 	default n
 	help
@@ -860,16 +860,16 @@ config SCHED_YIELD_PENALTY
 	  with a bounded sleep up to the next frame boundary. uid-gated
 	  (app range only), off by default.
 
-config SEW_QOS_INHERIT
-	tristate "Sew minimal futex QOS-inheritance"
+config KEXT_QOS_INHERIT
+	tristate "Kext minimal futex QOS-inheritance"
 	depends on ANDROID_VENDOR_HOOKS
 	default n
 	help
 	  OS4 xr_qi reduced port: uclamp_min hint for futex waiters of a
 	  configured vip tgid. Lock-inheritance on the futex chain only.
 
-config SEW_LAUNCH_BOOST
-	bool "Sew launch boost (uclamp floor for zygote forks)"
+config KEXT_LAUNCH_BOOST
+	bool "Kext launch boost (uclamp floor for zygote forks)"
 	depends on UCLAMP_TASK
 	default y
 	help
@@ -878,9 +878,9 @@ config SEW_LAUNCH_BOOST
 	  floor from their very first scheduling decision. The task stays
 	  in CFS under the cgroup clamps; after the window the pre-boost
 	  value is restored. Runtime knobs and counters:
-	  /sys/module/sew_launch_boost/parameters/ and /proc/sew_launch_boost.
-	  (Implementation lives in kernel/sched/sew_launch_boost.c; the
-	  config sits with the Sew family because kernel/sched/ has no
+	  /sys/module/kext_launch_boost/parameters/ and /proc/kext_launch_boost.
+	  (Implementation lives in kernel/sched/kext_launch_boost.c; the
+	  config sits with the Kext family because kernel/sched/ has no
 	  Kconfig of its own.)
 
 config UCLAMP_TASK
