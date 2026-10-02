@@ -783,3 +783,5 @@ CONFIG_NETFILTER_XT_MATCH_RECENT=y
 CONFIG_NETFILTER_XT_SET=y
 CONFIG_TMPFS_XATTR=y
 CONFIG_TMPFS_POSIX_ACL=y
+# NT synchronization primitive emulation (Wine/Proton/Winlator /dev/ntsync)
+CONFIG_NTSYNC=y
