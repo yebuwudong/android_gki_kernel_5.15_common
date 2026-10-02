@@ -67,6 +67,13 @@ jobs:
           echo "uname -r will report: ${REL}"
           test -f out/arch/arm64/boot/Image.gz
 
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image.gz-android13-gki
+          path: out/arch/arm64/boot/Image.gz
+          compression-level: 0
+
       - name: Package AnyKernel3 flashable zip
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 "$HOME/AnyKernel3"
@@ -75,13 +82,6 @@ jobs:
           REL=$(cat out/include/config/kernel.release)
           cd "$HOME/AnyKernel3"
           zip -r9 "$GITHUB_WORKSPACE/AnyKernel3-GKI-${REL}.zip" . -x '.git*'
-
-      - name: Upload kernel image
-        uses: actions/upload-artifact@v4
-        with:
-          name: Image.gz-android13-gki
-          path: out/arch/arm64/boot/Image.gz
-          compression-level: 0
 
       - name: Upload AnyKernel3 zip
         uses: actions/upload-artifact@v4
