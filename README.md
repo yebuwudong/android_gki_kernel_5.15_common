@@ -5,7 +5,7 @@
 - 基线分支：`android13-5.15-lts-2026-07`
 - 上游：Android Common Kernel `android13-5.15-lts`（R7.6 完整合并上游 57 提交）
 - 当前版本：Linux 5.15.216（Android 13 GKI）
-- 内核版本串：`5.15.216-android13-8`（GKI 默认格式，刷后 `uname -r` 可验证）
+- 内核版本串：`5.15.216-android13-8-g<hash>`（GKI 原生格式，带构建 commit 短哈希，可区分版本且无第三方标识）
 - 构建：LLVM=1（Clang），ThinLTO
 
 ## Droidspaces 容器支持
@@ -15,6 +15,7 @@
 1. **SYSVIPC kABI 补丁**（必须）— 已合入 `include/linux/sched.h`：`task_struct` 的 `sysvsem`/`sysvshm` 从原位迁入 `ANDROID_KABI_RESERVE(6)`/`RESERVE(7)+(8)`，开 `CONFIG_SYSVIPC`/`CONFIG_IPC_NS`/`CONFIG_POSIX_MQUEUE` 不改变既有字段偏移，原厂 vendor 模块可继续加载。本树 `RESERVE(1)` 已被 user_dumpable 占用，补丁使用的 6/7/8 未占用，官方 `001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch` 可直接套用。
 2. **gki_defconfig 直改**（GKI 不走 fragment）— 已按官方清单启用：`SYSVIPC`、`POSIX_MQUEUE`、`IPC_NS`、`PID_NS`（原为 not set）、`DEVTMPFS`、`NETFILTER_XT_MATCH_ADDRTYPE`，及推荐项 `USER_NS`、`NETFILTER_XT_SET`、`TMPFS_XATTR`、`TMPFS_POSIX_ACL`。`IP_NF/IP6_NF_TARGET_REJECT`（UFW）上游已内建。注意官方文档中 `NETFILTER_XT_TARGET_REJECT` 是旧内核符号名，5.15 的实际符号为 `IP_NF_TARGET_REJECT`/`IP6_NF_TARGET_REJECT`。
 3. **验证** — 刷机后在 Droidspaces 应用 Settings → Requirements → Check Requirements，或终端 `su -c droidspaces check`。
+4. **不要开 `CFS_BANDWIDTH` / `CGROUP_PIDS`（会导致 bootloop）** — 官方指南的 CPU/进程限额组做过实测：这两个选项会重排调度器与 cgroup 结构体，改变 **4101 个导出符号的 CRC**。原厂 vendor 模块按旧 CRC 编译，随即以 `disagrees about version of symbol` 拒绝加载，显示/存储/Wi-Fi 驱动缺失导致设备 bootloop（连 recovery 都进不去）。与 `SYSVIPC` 不同，新字段塞不进 kABI 预留空间，**没有补丁可解**。唯一安全路径是从同一源码树重编**全部**内核模块并同时刷 `boot.img`+`vendor_boot`+`vendor_dlkm`+`system_dlkm`——本设备 vendor 模块绝大多数为预编译，做不到。也**不要**靠关闭 `CONFIG_MODVERSIONS` 或强制加载绕过：结构体确实变了，模块会读到错误偏移。代价是 `--cpus` 与 `--pids-limit` 不可用（Droidspaces 会把这两个开关置灰），其余功能不受影响。
 
 ## 修改与移植特性
 
