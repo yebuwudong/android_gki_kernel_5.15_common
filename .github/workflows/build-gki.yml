@@ -5,6 +5,16 @@ on:
   push:
     branches:
       - 'android13-*'
+    paths:
+      - 'arch/arm64/configs/**'
+      - 'kernel/**'
+      - 'mm/**'
+      - 'security/**'
+      - 'drivers/**'
+      - 'include/**'
+      - 'fs/**'
+      - 'net/**'
+      - '.github/workflows/build-gki.yml'
 
 env:
   ARCH: arm64
@@ -53,6 +63,19 @@ jobs:
           fi
           "$HOME/clang/linux-x86/clang-${CLANG_VERSION}/bin/clang" --version
           echo "CLANG_BIN=$HOME/clang/linux-x86/clang-${CLANG_VERSION}/bin" >> "$GITHUB_ENV"
+
+      - name: Guard against kABI-breaking configs
+        run: |
+          # CFS_BANDWIDTH and CGROUP_PIDS resize scheduler/cgroup structs and
+          # change the CRC of ~4100 exported symbols. Prebuilt vendor modules
+          # then refuse to load and the device bootloops. A full fix needs
+          # every kernel module rebuilt and vendor_boot/vendor_dlkm/system_dlkm
+          # flashed together, which is impossible with prebuilt vendor modules.
+          if grep -qE '^CONFIG_(CFS_BANDWIDTH|CGROUP_PIDS)=y' arch/arm64/configs/gki_defconfig; then
+            echo "::error::CONFIG_CFS_BANDWIDTH/CONFIG_CGROUP_PIDS break the GKI kABI and bootloop the device. See README."
+            exit 1
+          fi
+          echo "kABI guard passed"
 
       - name: Configure and build
         run: |
