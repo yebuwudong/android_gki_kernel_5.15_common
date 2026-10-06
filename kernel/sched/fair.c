@@ -21,7 +21,6 @@
  *  Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra
  */
 #include "sched.h"
-#include <linux/prandom.h>
 
 #include <trace/hooks/sched.h>
 
@@ -5581,9 +5580,8 @@ void init_cfs_bandwidth(struct cfs_bandwidth *cfs_b)
 	cfs_b->period_timer.function = sched_cfs_period_timer;
 
 	/* Add a random offset so that timers interleave */
-	/* 5.15 backport: get_random_u32_below() is 6.2+; 5.15 has prandom_u32_max() */
 	hrtimer_set_expires(&cfs_b->period_timer,
-			    prandom_u32_max(cfs_b->period));
+			    get_random_u32_below(cfs_b->period));
 	hrtimer_init(&cfs_b->slack_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	cfs_b->slack_timer.function = sched_cfs_slack_timer;
 	cfs_b->slack_started = false;
