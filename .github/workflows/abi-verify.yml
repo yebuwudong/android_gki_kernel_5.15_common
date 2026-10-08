@@ -1,6 +1,6 @@
 name: ABI Verify (symbol CRC comparison)
 
-# Verifies whether ci/abi-safe/abi-safe.patch keeps the exported-symbol CRCs
+# Verifies whether ci/abi-safe/abi-safe-code.patch keeps the exported-symbol CRCs
 # identical to the current (known-bootable) configuration. Produces NO
 # flashable image on purpose - artifacts are symbol tables and a report only.
 on:
@@ -63,9 +63,10 @@ jobs:
           set -e
           git worktree add "$HOME/patched" HEAD
           cd "$HOME/patched"
-          # Apply everything except the defconfig hunk (IP6_NF_NAT is already
-          # enabled in our tree, so that hunk's context cannot match).
-          patch -p1 --forward --exclude='arch/arm64/configs/gki_defconfig' < ci/abi-safe/abi-safe.patch
+          # Apply the code patch. The defconfig file diff is excluded because
+          # its context cannot match (our tree already enables IP6_NF_NAT);
+          # the equivalent config edits are applied explicitly below.
+          patch -p1 --forward < ci/abi-safe/abi-safe-code.patch
           grep -q '^CONFIG_CFS_BANDWIDTH=y'   arch/arm64/configs/gki_defconfig || \
             sed -i '/^CONFIG_CGROUP_SCHED=y$/a CONFIG_CFS_BANDWIDTH=y' arch/arm64/configs/gki_defconfig
           grep -q '^CONFIG_CGROUP_PIDS=y'      arch/arm64/configs/gki_defconfig || \
