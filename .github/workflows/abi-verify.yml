@@ -1,0 +1,130 @@
+name: ABI Verify (symbol CRC comparison)
+
+# Verifies whether ci/abi-safe/abi-safe.patch keeps the exported-symbol CRCs
+# identical to the current (known-bootable) configuration. Produces NO
+# flashable image on purpose - artifacts are symbol tables and a report only.
+on:
+  workflow_dispatch:
+
+env:
+  ARCH: arm64
+  CLANG_VERSION: r547379
+  LOCALVERSION: -android13-8
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison ca-certificates dwarves flex gcc-aarch64-linux-gnu \
+            libelf-dev libssl-dev python3 zip
+          sudo apt-get clean
+          echo "nproc=$(nproc)" >> "$GITHUB_ENV"
+
+      - name: Fetch clang ${{ env.CLANG_VERSION }}
+        run: |
+          git clone --filter=blob:none --no-checkout --depth 1 -b main \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            "$HOME/clang/linux-x86"
+          cd "$HOME/clang/linux-x86"
+          git sparse-checkout init --cone
+          git sparse-checkout set "clang-${CLANG_VERSION}"
+          git checkout main
+          echo "CLANG_BIN=$HOME/clang/linux-x86/clang-${CLANG_VERSION}/bin" >> "$GITHUB_ENV"
+
+      - name: Build BASELINE (current config) and export symbol CRCs
+        run: |
+          export PATH="${CLANG_BIN}:$PATH"
+          mkdir -p "$HOME/out-base"
+          make O="$HOME/out-base" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 gki_defconfig
+          make O="$HOME/out-base" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} modules_prepare
+          make O="$HOME/out-base" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} Image.gz
+          cp "$HOME/out-base/Module.symvers" "$HOME/base.symvers"
+          echo "baseline symbols: $(wc -l < $HOME/base.symvers)"
+
+      - name: Apply patch into a SEPARATE worktree
+        run: |
+          set -e
+          git worktree add "$HOME/patched" HEAD
+          cd "$HOME/patched"
+          # Apply everything except the defconfig hunk (IP6_NF_NAT is already
+          # enabled in our tree, so that hunk's context cannot match).
+          patch -p1 --forward --exclude='arch/arm64/configs/gki_defconfig' < ci/abi-safe/abi-safe.patch
+          grep -q '^CONFIG_CFS_BANDWIDTH=y'   arch/arm64/configs/gki_defconfig || \
+            sed -i '/^CONFIG_CGROUP_SCHED=y$/a CONFIG_CFS_BANDWIDTH=y' arch/arm64/configs/gki_defconfig
+          grep -q '^CONFIG_CGROUP_PIDS=y'      arch/arm64/configs/gki_defconfig || \
+            sed -i '/^CONFIG_UCLAMP_TASK_GROUP=y$/a CONFIG_CGROUP_PIDS=y' arch/arm64/configs/gki_defconfig
+          grep -q '^CONFIG_IP6_NF_TARGET_MASQUERADE=y' arch/arm64/configs/gki_defconfig || \
+            sed -i '/^CONFIG_IP6_NF_NAT=y$/a CONFIG_IP6_NF_TARGET_MASQUERADE=y' arch/arm64/configs/gki_defconfig
+          # Latent ACK defect: this line only compiles once CFS_BANDWIDTH is on.
+          grep -q 'prandom_u32_max' kernel/sched/fair.c || {
+            sed -i 's/^\t\t\t    get_random_u32_below(cfs_b->period));$/\t\t\t    prandom_u32_max(cfs_b->period));/' kernel/sched/fair.c
+            sed -i '0,/^#include "sched.h"$/s//#include "sched.h"\n#include <linux\/prandom.h>/' kernel/sched/fair.c
+          }
+          echo "=== rejects (must be empty) ==="
+          find . -name '*.rej' | tee /tmp/rejects.txt
+          [ ! -s /tmp/rejects.txt ]
+          echo "=== patch actually applied? (expect both present) ==="
+          grep -q 'cfs_bandwidth_state' kernel/sched/sched.h && echo "sched.h: patched"
+          grep -q 'css_set_get_subsys' include/linux/cgroup-defs.h && echo "cgroup-defs.h: patched"
+          echo "=== patched defconfig lines ==="
+          grep -nE '^CONFIG_(CFS_BANDWIDTH|CGROUP_PIDS|IP6_NF_NAT|IP6_NF_TARGET_MASQUERADE)=' arch/arm64/configs/gki_defconfig
+
+      - name: Build PATCHED and export symbol CRCs
+        run: |
+          export PATH="${CLANG_BIN}:$PATH"
+          mkdir -p "$HOME/out-pat"
+          make -C "$HOME/patched" O="$HOME/out-pat" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 gki_defconfig
+          make -C "$HOME/patched" O="$HOME/out-pat" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} modules_prepare
+          make -C "$HOME/patched" O="$HOME/out-pat" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} Image.gz
+          cp "$HOME/out-pat/Module.symvers" "$HOME/pat.symvers"
+          echo "patched symbols: $(wc -l < $HOME/pat.symvers)"
+
+      - name: Compare CRCs and write report
+        run: |
+          set -e
+          awk '{print $2, $1}' "$HOME/base.symvers" | sort > /tmp/b.txt
+          awk '{print $2, $1}' "$HOME/pat.symvers"  | sort > /tmp/p.txt
+          {
+            echo "# ABI verify report"
+            echo
+            echo "- baseline symbols: $(wc -l < $HOME/base.symvers)"
+            echo "- patched symbols:  $(wc -l < $HOME/pat.symvers)"
+            echo
+            echo "## symbols only in baseline (would disappear)"
+            comm -23 <(cut -d' ' -f1 /tmp/b.txt) <(cut -d' ' -f1 /tmp/p.txt) | head -40
+            echo
+            echo "## symbols only in patched (would be new)"
+            comm -13 <(cut -d' ' -f1 /tmp/b.txt) <(cut -d' ' -f1 /tmp/p.txt) | head -40
+            echo
+            echo "## CRC changes on common symbols"
+            join /tmp/b.txt /tmp/p.txt | awk '$2!=$3 {print $1"  base="$2"  patched="$3}' > /tmp/changed.txt
+            echo "changed count: $(wc -l < /tmp/changed.txt)"
+            head -80 /tmp/changed.txt
+          } > "$HOME/abi-report.md"
+          cat "$HOME/abi-report.md"
+          echo "=== VERDICT ==="
+          if [ -s /tmp/changed.txt ] || [ -n "$(comm -3 <(cut -d' ' -f1 /tmp/b.txt) <(cut -d' ' -f1 /tmp/p.txt))" ]; then
+            echo "ABI DIFFERS: patch is NOT safe for prebuilt vendor modules."
+          else
+            echo "ABI IDENTICAL: CRCs match the bootable baseline."
+          fi
+
+      - name: Upload symbol tables and report
+        uses: actions/upload-artifact@v4
+        with:
+          name: abi-verify-result
+          path: |
+            /home/runner/base.symvers
+            /home/runner/pat.symvers
+            /home/runner/abi-report.md
+          compression-level: 6
+          if-no-files-found: error
