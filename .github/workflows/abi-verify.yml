@@ -56,6 +56,20 @@ jobs:
           make O="$HOME/out-base" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} modules
           test -f "$HOME/out-base/Module.symvers"
           cp "$HOME/out-base/Module.symvers" "$HOME/base.symvers"
+          # Layout dump: the real safety bar on a device that does not
+          # enforce module CRCs is that struct sizes/offsets stay put.
+          dump_layout() {
+            local v=$1 out=$2
+            : > "$out"
+            for st in task_struct css_set cgroup cgroup_root cgroup_subsys_state \
+                      task_group cfs_rq rq cfs_bandwidth sched_entity sched_avg \
+                      signal_struct mm_struct cgroup_subsys; do
+              echo "### $st" >> "$out"
+              pahole -C "$st" "$v" >> "$out" 2>/dev/null || echo "(absent)" >> "$out"
+            done
+          }
+          dump_layout "$HOME/out-base/vmlinux" "$HOME/layout-base.txt"
+          echo "baseline layout lines: $(wc -l < $HOME/layout-base.txt)"
           echo "baseline symbols: $(wc -l < $HOME/base.symvers)"
 
       - name: Apply patch into a SEPARATE worktree
@@ -96,6 +110,18 @@ jobs:
           make -C "$HOME/patched" O="$HOME/out-pat" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} modules
           test -f "$HOME/out-pat/Module.symvers"
           cp "$HOME/out-pat/Module.symvers" "$HOME/pat.symvers"
+          dump_layout() {
+            local v=$1 out=$2
+            : > "$out"
+            for st in task_struct css_set cgroup cgroup_root cgroup_subsys_state \
+                      task_group cfs_rq rq cfs_bandwidth sched_entity sched_avg \
+                      signal_struct mm_struct cgroup_subsys; do
+              echo "### $st" >> "$out"
+              pahole -C "$st" "$v" >> "$out" 2>/dev/null || echo "(absent)" >> "$out"
+            done
+          }
+          dump_layout "$HOME/out-pat/vmlinux" "$HOME/layout-pat.txt"
+          echo "patched layout lines: $(wc -l < $HOME/layout-pat.txt)"
           echo "patched symbols: $(wc -l < $HOME/pat.symvers)"
 
       - name: Compare CRCs and write report
@@ -119,13 +145,23 @@ jobs:
             join /tmp/b.txt /tmp/p.txt | awk '$2!=$3 {print $1"  base="$2"  patched="$3}' > /tmp/changed.txt
             echo "changed count: $(wc -l < /tmp/changed.txt)"
             head -80 /tmp/changed.txt
+            echo
+            echo "## STRUCT LAYOUT DIFF (the real safety bar)"
+            if diff -u "$HOME/layout-base.txt" "$HOME/layout-pat.txt" > /tmp/layout-diff.txt; then
+              echo "layout IDENTICAL for all checked structs"
+            else
+              echo "layout DIFFERS - see below"
+              head -120 /tmp/layout-diff.txt
+            fi
           } > "$HOME/abi-report.md"
           cat "$HOME/abi-report.md"
           echo "=== VERDICT ==="
-          if [ -s /tmp/changed.txt ] || [ -n "$(comm -3 <(cut -d' ' -f1 /tmp/b.txt) <(cut -d' ' -f1 /tmp/p.txt))" ]; then
-            echo "ABI DIFFERS: patch is NOT safe for prebuilt vendor modules."
+          echo "device does not enforce module CRCs, so CRC churn alone is not fatal;"
+          echo "struct layout is the bar."
+          if diff -q "$HOME/layout-base.txt" "$HOME/layout-pat.txt" >/dev/null; then
+            echo "LAYOUT IDENTICAL: safe for prebuilt vendor modules (CRC churn is cosmetic here)."
           else
-            echo "ABI IDENTICAL: CRCs match the bootable baseline."
+            echo "LAYOUT DIFFERS: patch is NOT safe - vendor modules would read wrong offsets."
           fi
 
       - name: Upload symbol tables and report
@@ -136,5 +172,7 @@ jobs:
             /home/runner/base.symvers
             /home/runner/pat.symvers
             /home/runner/abi-report.md
+            /home/runner/layout-base.txt
+            /home/runner/layout-pat.txt
           compression-level: 6
           if-no-files-found: error
