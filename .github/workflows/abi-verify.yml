@@ -48,8 +48,13 @@ jobs:
           export PATH="${CLANG_BIN}:$PATH"
           mkdir -p "$HOME/out-base"
           make O="$HOME/out-base" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 gki_defconfig
-          make O="$HOME/out-base" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} modules_prepare
+          # Image.gz alone never runs modpost, so build the modules too in
+          # order to get Module.symvers (which holds the CRCs we compare).
           make O="$HOME/out-base" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} Image.gz
+          # Module.symvers is emitted by modpost (reached via 'modules').
+          # This config has only =m modules, so the step is cheap.
+          make O="$HOME/out-base" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} modules
+          test -f "$HOME/out-base/Module.symvers"
           cp "$HOME/out-base/Module.symvers" "$HOME/base.symvers"
           echo "baseline symbols: $(wc -l < $HOME/base.symvers)"
 
@@ -86,8 +91,9 @@ jobs:
           export PATH="${CLANG_BIN}:$PATH"
           mkdir -p "$HOME/out-pat"
           make -C "$HOME/patched" O="$HOME/out-pat" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 gki_defconfig
-          make -C "$HOME/patched" O="$HOME/out-pat" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} modules_prepare
           make -C "$HOME/patched" O="$HOME/out-pat" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} Image.gz
+          make -C "$HOME/patched" O="$HOME/out-pat" ARCH=${ARCH} LLVM=1 LLVM_IAS=1 -j${nproc} modules
+          test -f "$HOME/out-pat/Module.symvers"
           cp "$HOME/out-pat/Module.symvers" "$HOME/pat.symvers"
           echo "patched symbols: $(wc -l < $HOME/pat.symvers)"
 
