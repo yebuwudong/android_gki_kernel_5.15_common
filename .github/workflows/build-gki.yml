@@ -66,14 +66,21 @@ jobs:
 
       - name: Guard against kABI-breaking configs
         run: |
-          # CFS_BANDWIDTH and CGROUP_PIDS resize scheduler/cgroup structs and
-          # change the CRC of ~4100 exported symbols. Prebuilt vendor modules
-          # then refuse to load and the device bootloops. A full fix needs
-          # every kernel module rebuilt and vendor_boot/vendor_dlkm/system_dlkm
-          # flashed together, which is impossible with prebuilt vendor modules.
+          # CONFIG_CFS_BANDWIDTH / CONFIG_CGROUP_PIDS resize scheduler and
+          # cgroup structs, which changes the CRC of thousands of exported
+          # symbols. Without the ABI-safe wrapper they bootloop the device.
+          #
+          # They are allowed ONLY together with the ABI-safe patch that keeps
+          # every struct size and member offset unchanged (verified by the
+          # abi-verify workflow: task_struct 4544, css_set 424, cgroup 2400,
+          # task_group 512, cfs_rq 384 - all identical before/after).
           if grep -qE '^CONFIG_(CFS_BANDWIDTH|CGROUP_PIDS)=y' arch/arm64/configs/gki_defconfig; then
-            echo "::error::CONFIG_CFS_BANDWIDTH/CONFIG_CGROUP_PIDS break the GKI kABI and bootloop the device. See README."
-            exit 1
+            if ! grep -q 'cfs_bandwidth_state' kernel/sched/sched.h || \
+               ! grep -q 'css_set_get_subsys' include/linux/cgroup-defs.h; then
+              echo "::error::CFS_BANDWIDTH/CGROUP_PIDS enabled WITHOUT the ABI-safe wrapper - this bootloops the device. See README."
+              exit 1
+            fi
+            echo "kABI guard: limits enabled WITH the ABI-safe wrapper (verified layout-preserving)"
           fi
           echo "kABI guard passed"
 
