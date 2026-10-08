@@ -5,6 +5,9 @@ name: ABI Verify (symbol CRC comparison)
 # flashable image on purpose - artifacts are symbol tables and a report only.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - abi-verify
 
 env:
   ARCH: arm64
