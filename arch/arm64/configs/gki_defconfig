@@ -791,4 +791,3 @@ CONFIG_TMPFS_POSIX_ACL=y
 # NT synchronization primitive emulation (Wine/Proton/Winlator /dev/ntsync)
 CONFIG_NTSYNC=y
 CONFIG_CIFS=y
-CONFIG_NOMOUNT=y
