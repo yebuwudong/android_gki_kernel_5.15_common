@@ -90,6 +90,23 @@ jobs:
           echo "uname -r will report: ${REL}"
           test -f out/arch/arm64/boot/Image.gz
 
+      - name: Dump ABI-relevant struct layouts
+        run: |
+          # Reading vmlinux costs nothing extra: it is already built. The dump
+          # lands in the run as an artifact, so any later build of the same
+          # tree can be diffed against it without compiling a second kernel.
+          OUT="$HOME/layout-$(cat out/include/config/kernel.release).txt"
+          : > "$OUT"
+          for st in task_struct css_set cgroup cgroup_root cgroup_subsys_state \
+                    task_group cfs_rq rq cfs_bandwidth sched_entity sched_avg \
+                    signal_struct mm_struct cgroup_subsys \
+                    sock sk_buff tcp_sock tcp_skb_cb tcp_timewait_sock inet_sock; do
+            echo "### $st" >> "$OUT"
+            pahole -C "$st" out/vmlinux >> "$OUT" 2>/dev/null || echo "(absent)" >> "$OUT"
+          done
+          echo "layout lines: $(wc -l < $OUT)"
+          echo "LAYOUT_FILE=$OUT" >> "$GITHUB_ENV"
+
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
@@ -175,3 +192,10 @@ jobs:
           name: AnyKernel3-GKI-flashable
           path: AnyKernel3-GKI-*.zip
           compression-level: 0
+
+      - name: Upload struct layout dump
+        uses: actions/upload-artifact@v4
+        with:
+          name: struct-layout
+          path: ${{ env.LAYOUT_FILE }}
+          compression-level: 6
