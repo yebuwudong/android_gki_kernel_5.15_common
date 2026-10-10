@@ -768,7 +768,7 @@ CONFIG_IP_SET_LIST_SET=y
 CONFIG_TCP_CONG_ADVANCED=y
 CONFIG_TCP_CONG_BBR=y
 CONFIG_TCP_CONG_BBR3=y
-CONFIG_DEFAULT_BBR=y
+CONFIG_DEFAULT_BBR3=y
 
 # Container support (Droidspaces): IPC and namespaces for Linux containers
 # on GKI; requires the SYSVIPC kABI fix in include/linux/sched.h.
